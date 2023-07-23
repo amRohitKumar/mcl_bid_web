@@ -12,6 +12,7 @@ import civil_attorney as civ_attorney
 
 # PACKAGES IMPORT
 import threading
+import uuid
 import time
 import json
 import os
@@ -92,10 +93,9 @@ def signup():
     if user_obj:
         return {"msg": "User already exist !"}
 
-    users.insert_one({"email": email, "password": password,
-                     "status": "0", "reports": "", "details": ""})
+    users.insert_one({"email": email, "password": password, "reports": []})
     access_token = create_access_token(identity=email)
-    response = {"access_token": access_token, "isFilled": "0"}
+    response = {"access_token": access_token}
     return response
 
 
@@ -110,12 +110,8 @@ def login():
     if user_obj == None or password != user_obj['password']:
         return {"msg": "Wrong email or password"}, 401
 
-    is_filled = "0"
-    if ((user_obj["details"]) and (user_obj["reports"])):
-        is_filled = "1"
-
     access_token = create_access_token(identity=email)
-    response = {"access_token": access_token, "isFilled": is_filled}
+    response = {"access_token": access_token}
     return response
 
 
@@ -129,118 +125,61 @@ def logout():
 class Extractor:
     def extract_pan(self, filepath):
         return mclp.getPAN(filepath)
-    
+
     def extract_gstin(self, filepath):
         return mclg.getGSTIN(filepath)
-    
+
     def extract_info_from_legal(self, filepath):
         return mcll.extract_from_legal(filepath)
+
 
 class CivilExtractor(Extractor):
     nit_desc = {}
     gtc = ""
-    
+
     def __init__(self, nit_path):
         n = nit.CivilNITDoc(nit_path)
         self.nit_desc = n.extract_info()
-        
+
     def extract_info_from_ca(self, filepath):
         return mclc.extract_from_CA(filepath)
-    
+
     def extract_attorney(self, filepath):
-        return civ_attorney.extract_attorney(filepath)  
-    
+        return civ_attorney.extract_attorney(filepath)
+
     def extract_local_content(self, filepath):
         return mcl_under.extract_local_content(filepath)
-    
 
-class CMCExtractor(Extractor):   
+
+class CMCExtractor(Extractor):
     nit_desc = {}
     gtc = ""
+
     def __init__(self, nit_path, gtc_path) -> None:
         n = nit.CMCNITDoc(nit_path)
         self.nit_desc = n.extract_info()
         self.gtc = mcl_under.extract_gtc(gtc_path)
-    
+
     def extract_from_affidavit(self, filepath):
         return mcla.extract_attorney_desc(filepath, self.nit_desc["Work Description"])
-    
+
     def extract_from_dsc(self, filepath):
         return mcld.extract_from_dsc(filepath)
-    
+
     def extract_workcap(self, filepath):
         return mclw.extract_workcap(filepath)
-    
+
     def check_undertaking(self, filepath):
         return mcl_under.compare_genuineness(filepath, self.gtc)
 
-# class CivilExtractor:
-#     nit_desc = {}
-#     gtc = ""
-#     links = {}
 
-#     def __init__(self, links) -> None:
-#         self.links = links
-
-#     def output(self):
-#         ca_output = mclc.extract_from_CA(self.links["ca_link"])
-
-#         final_output = {
-#             'nit_desc': self.nit_desc,
-#             'ca_name': ca_output['CA Name'],
-#             'udin': ca_output['UDIN No.'],
-#             'company_audited': ca_output['Company audited'],
-#             'type_of_work': ca_output['Type of work done'],
-#             'relevent_work_experience': ca_output['Relevant Work Experience'].to_dict(orient='records')
-#         }
-
-#         return final_output
-
-
-# class CMCExtractor:
-#     nit_desc = {}
-#     gtc = ""
-#     links = {}
-
-#     def __init__(self, links) -> None:
-#         self.links = links
-#         n = nit.NITDocument(links["nit_link"])
-#         self.nit_desc = n.extract_info()
-#         self.gtc = mcl_under.extract_gtc_undertaking(links["gtc_link"])
-
-#     def output(self):
-#         pan_output = mclp.getPAN(self.links['pan_link'])
-#         gstin_output = mclg.getGSTIN(self.links['gstin_link'])
-#         legal_output = mcll.extract_from_legal(self.links['legal_link'])
-#         attorney_output = mcla.extract_attorney_desc(
-#             self.links['attorney_link'], self.nit_desc["Work Description"])
-#         time.sleep(45)
-#         dsc_output = mcld.extract_from_dsc(self.links['dsc_link'])
-#         workcap_output = mclw.extract_workcap(self.links['workcap_link'])
-#         time.sleep(60)
-#         undertaking_output = mcl_under.compare_undertakings(
-#             self.links["under_link"], self.gtc)
-
-#         final_output = {
-#             'nit_desc': self.nit_desc,
-#             'pan': pan_output,
-#             'gstin': gstin_output,
-#             'attorney': attorney_output,
-#             'legal': legal_output,
-#             'dsc': dsc_output,
-#             'workcap': workcap_output,
-#             'undertaking': undertaking_output,
-#         }
-
-#         return final_output
-
-
-def background_processing(links, email, type):
+def background_processing(links, email, bid_id, type):
     # STATUS => 0 loading, 1 finished
 
     final_output = {}
 
-    users.update_one({"email": email}, {"$set": {'status': "1"}}, upsert=False)
+    users.update_one({"reports._id": bid_id}, {
+                     "$set": {'status': "1"}}, upsert=False)
 
     if type == "cmc":
         extr_obj = CMCExtractor(links["nit_link"], links["gtc_link"])
@@ -273,15 +212,17 @@ def background_processing(links, email, type):
         del extr_obj
     # STORE RESULT IN DATABASE
 
-    users.update_one({"email": email}, {"$set": {'reports':
+    users.update_one({"reports._id": bid_id}, {"$set": {'output':
                      json.dumps(final_output), 'status': "0"}}, upsert=False)
 
 
 @app.route('/result', methods=['POST'])
 @jwt_required()
 def combined_func():
+    bid_id = request.json.get("bid_id", None)
     links = request.json.get("links", None)
     extractor_type = request.json.get("type", None)
+    users.update_one({"reports._id": bid_id}, {"$set": {"links": links}})
 
     links = json.loads(links)
     print(links)
@@ -296,11 +237,19 @@ def combined_func():
     #     # SINGLE THREAD
     try:
         thread = threading.Thread(target=background_processing, kwargs={
-            'links': links, 'email': current_user_email, 'type': extractor_type})
+            'links': links, 'email': current_user_email, bid_id: bid_id, 'type': extractor_type})
         thread.start()
     except:
         print("error in threading")
     return "1"
+
+
+@app.route('/bidder_list', methods=['GET'])
+@jwt_required()
+def getBidderList():
+    current_user_email = get_jwt_identity()
+    bidder_list = users.find_one({"email": current_user_email})
+    return {"bidder_list": bidder_list["reports"]}
 
 
 @app.route('/details', methods=['POST'])
@@ -308,9 +257,10 @@ def combined_func():
 def saveDetailToDB():
     current_user_email = get_jwt_identity()
     data = request.json.get("details", None)
+    unique_id = uuid.uuid4().hex
     users.update_one({"email": current_user_email}, {
-                     "$set": {"details": data}}, upsert=False)
-    return {"msg": "Details saved successfully !"}
+                     "$push": {"reports": {"_id": unique_id, "details": data}}})
+    return {"bid_id": unique_id}
 
 
 @app.route('/reports')

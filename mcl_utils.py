@@ -15,6 +15,7 @@ import requests
 import openai
 import io
 from dotenv import load_dotenv
+import time
 import easyocr  # for optical character recognition
 
 load_dotenv()
@@ -88,6 +89,7 @@ def extract_text_easyocr(imagepath, sep=""):
 
 def get_answer(context, question, 
                cleaning_text=r'"([^"]*)"', number=1):
+    time.sleep(30)
     prompt = context + " What is the" + question + " in the above text? Say just the" + question + " in quotation marks or parentheses."
     answer = openai.ChatCompletion.create(
         messages=[{

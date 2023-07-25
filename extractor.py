@@ -178,8 +178,8 @@ def background_processing(links, email, bid_id, type):
 
     final_output = {}
 
-    users.update_one({"reports._id": bid_id}, {
-                     "$set": {'status': "1"}}, upsert=False)
+    users.update_one({"email": email, "reports._id": bid_id}, {
+                     "$set": {"reports.$.status": "1"}})
 
     if type == "cmc":
         extr_obj = CMCExtractor(links["nit_link"], links["gtc_link"])
@@ -212,22 +212,23 @@ def background_processing(links, email, bid_id, type):
         del extr_obj
     # STORE RESULT IN DATABASE
 
-    users.update_one({"reports._id": bid_id}, {"$set": {'output':
-                     json.dumps(final_output), 'status': "0"}}, upsert=False)
+    users.update_one({"email": email, "reports._id": bid_id}, {"$set": {'reports.$.output':
+                     json.dumps(final_output), 'reports.$.status': "0"}}, upsert=False)
 
 
 @app.route('/result', methods=['POST'])
 @jwt_required()
 def combined_func():
+    current_user_email = get_jwt_identity()
     bid_id = request.json.get("bid_id", None)
     links = request.json.get("links", None)
     extractor_type = request.json.get("type", None)
-    users.update_one({"reports._id": bid_id}, {"$set": {"links": links}})
+    users.update_one({"email": current_user_email, "reports._id": bid_id}, {
+                     "$set": {"reports.$.links": links}})
 
     links = json.loads(links)
     print(links)
     print(extractor_type)
-    current_user_email = get_jwt_identity()
     print("----------------")
     # print(links)
     # if (links.get("pan_link") and links.get("gstin_link") and links.get("ca_link") and links.get("legal_link") and links.get("attorney_link") and links.get("dsc_link") and links.get("workcap_link") and links.get("attorney_nit_desc")):
@@ -237,7 +238,7 @@ def combined_func():
     #     # SINGLE THREAD
     try:
         thread = threading.Thread(target=background_processing, kwargs={
-            'links': links, 'email': current_user_email, bid_id: bid_id, 'type': extractor_type})
+            'links': links, 'email': current_user_email, "bid_id": bid_id, 'type': extractor_type})
         thread.start()
     except:
         print("error in threading")

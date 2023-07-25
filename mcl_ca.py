@@ -1,6 +1,7 @@
 import mcl_utils as mclu
 import re
 import pandas as pd
+import time
 
 def extract_from_CA(filepath):
   filetext = mclu.extract_text(filepath, endpg=1)
@@ -9,6 +10,7 @@ def extract_from_CA(filepath):
   udin = re.findall(r"UDIN[:; -]*([0-9A-Z ]*)", filetext)[0].replace(" ", "")
   
   audited = mclu.get_answer(filetext, "name of the company audited")
+  time.sleep(30)
   turnover = re.findall(r"20[\d][\d][ ]*-[ ]*20[\d][\d][ ]*([0-9.]+[,]?[0-9.]*)[ ]*", filetext)
   year = re.findall(r"(20[\d][\d][ ]*-[ ]*20[\d][\d])[ ]*[0-9.]+[ ]*", filetext)
   relevant_work = pd.DataFrame({"Financial Year": year,
